@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS frames (
     idx         INT NOT NULL,
     timestamp_s DOUBLE PRECISION NOT NULL,
     embedding   vector(512) NOT NULL,
+    pca_x       DOUBLE PRECISION,
+    pca_y       DOUBLE PRECISION,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     UNIQUE (video_id, idx)
@@ -39,3 +41,5 @@ CREATE INDEX IF NOT EXISTS idx_videos_status ON videos (status);
 -- Migrations for existing databases
 ALTER TABLE videos ADD COLUMN IF NOT EXISTS content_hash TEXT;
 ALTER TABLE videos DROP CONSTRAINT IF EXISTS videos_content_hash_key;
+ALTER TABLE frames ADD COLUMN IF NOT EXISTS pca_x DOUBLE PRECISION;
+ALTER TABLE frames ADD COLUMN IF NOT EXISTS pca_y DOUBLE PRECISION;
