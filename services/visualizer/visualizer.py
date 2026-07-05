@@ -181,17 +181,26 @@ def find_similar(video_id, frame_idx, limit=10, exclude_video_id=None):
             return []
         query_emb = row[0]
 
-        sql = (
-            "SELECT f.video_id::text, f.idx, f.timestamp_s, v.filename, v.source_path, "
-            "f.embedding <=> %s::vector AS distance "
-            "FROM frames f JOIN videos v ON v.id = f.video_id "
-        )
-        params = [query_emb]
         if exclude_video_id:
-            sql += "WHERE v.id != %s::uuid "
-            params.append(exclude_video_id)
-        sql += "ORDER BY distance LIMIT %s"
-        params.append(limit)
+            sql = (
+                "SELECT * FROM ("
+                "SELECT DISTINCT ON (f.video_id) "
+                "f.video_id::text, f.idx, f.timestamp_s, v.filename, v.source_path, "
+                "f.embedding <=> %s::vector AS distance "
+                "FROM frames f JOIN videos v ON v.id = f.video_id "
+                "WHERE v.id != %s::uuid "
+                "ORDER BY f.video_id, distance"
+                ") sub ORDER BY distance"
+            )
+            params = [query_emb, exclude_video_id]
+        else:
+            sql = (
+                "SELECT f.video_id::text, f.idx, f.timestamp_s, v.filename, v.source_path, "
+                "f.embedding <=> %s::vector AS distance "
+                "FROM frames f JOIN videos v ON v.id = f.video_id "
+                "ORDER BY distance LIMIT %s"
+            )
+            params = [query_emb, limit]
         cur.execute(sql, params)
         rows = cur.fetchall()
     conn.close()
