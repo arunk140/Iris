@@ -241,16 +241,24 @@ def build_flow(video_id, start_idx, clip_frames, steps, first_filename, first_so
     flow = []
     cur_vid, cur_idx = video_id, start_idx
     cur_fname, cur_spath = first_filename, first_source_path
+    used_clips = {(video_id, start_idx)}
     for step in range(steps):
         clip_path = extract_clip(cur_vid, cur_idx, clip_frames, cur_spath)
         flow.append((cur_vid, cur_idx, cur_fname, clip_path, None))
         if step == steps - 1:
             break
         last_idx = cur_idx + clip_frames - 1
-        neighbors = find_similar(cur_vid, last_idx, limit=1, exclude_video_id=cur_vid)
-        if not neighbors:
+        neighbors = find_similar(cur_vid, last_idx, limit=10, exclude_video_id=cur_vid)
+        next_step = None
+        for n in neighbors:
+            key = (n[0], n[1])
+            if key not in used_clips:
+                next_step = n
+                break
+        if next_step is None:
             break
-        n_vid, n_idx, n_ts, n_fname, n_spath, n_dist = neighbors[0]
+        n_vid, n_idx, n_ts, n_fname, n_spath, n_dist = next_step
+        used_clips.add((n_vid, n_idx))
         flow[-1] = (cur_vid, cur_idx, cur_fname, clip_path, n_dist)
         cur_vid, cur_idx, cur_fname, cur_spath = n_vid, n_idx, n_fname, n_spath
     return flow
