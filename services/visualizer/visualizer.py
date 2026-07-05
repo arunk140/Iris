@@ -244,17 +244,27 @@ def build_flow(video_id, start_idx, clip_frames, steps, first_filename, first_so
     return flow
 
 
-def merge_flow(clip_paths, output_path):
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-        for path in clip_paths:
-            f.write(f"file '{path}'\n")
-        list_path = f.name
+def merge_flow(clip_paths, output_path, clip_duration, overlap):
+    n = len(clip_paths)
+    filters = []
+    for i in range(n):
+        filters.append(f"[{i}:v]trim=duration={clip_duration}[v{i}]")
+    prev = "v0"
+    for i in range(1, n):
+        out = "outv" if i == n - 1 else f"m{i}"
+        offset = i * (clip_duration - overlap)
+        filters.append(
+            f"[{prev}][v{i}]xfade=transition=fade:duration={overlap}:offset={offset},"
+            f"format=yuv420p[{out}]"
+        )
+        prev = out
+    inputs = [arg for p in clip_paths for arg in ("-i", p)]
     subprocess.run(
-        ["ffmpeg", "-f", "concat", "-safe", "0",
-         "-i", list_path, "-c", "copy", "-y", output_path],
+        ["ffmpeg"] + inputs
+        + ["-filter_complex", ";".join(filters),
+           "-map", f"[{prev}]", "-an", "-y", output_path],
         capture_output=True, check=True,
     )
-    os.unlink(list_path)
     return output_path
 
 
@@ -302,7 +312,8 @@ def st_main():
         st.divider()
         st.subheader("Flow")
         clip_duration = st.slider("Clip duration (s)", 1, 10, 5)
-        flow_steps = st.slider("Flow steps", 2, 10, 5)
+        flow_steps = st.number_input("Flow steps", min_value=0, max_value=500, value=5)
+        overlap = st.slider("Transition overlap (s)", 0.0, 3.0, 1.0, 0.5)
 
         compute_clicked = False
         if method in ("t-SNE", "UMAP"):
@@ -456,6 +467,7 @@ def st_main():
                     merged = merge_flow(
                         [step[3] for step in st.session_state.flow],
                         os.path.join(CACHE_DIR, "flow_merged.mp4"),
+                        clip_duration, overlap,
                     )
                 st.session_state.flow_merged = merged
                 st.rerun()

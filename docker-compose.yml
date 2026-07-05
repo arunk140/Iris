@@ -123,6 +123,8 @@ services:
       SOURCE_DIR: /data/source
       FRAMES_DIR: /data/frames
       CACHE_DIR: /tmp/iris_cache
+      STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
+      STREAMLIT_TELEMETRY_DISABLED: "true"
     ports:
       - "8501:8501"
     depends_on:
