@@ -1,0 +1,135 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: iris
+      POSTGRES_PASSWORD: iris
+      POSTGRES_DB: iris
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iris"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  watcher:
+    build: ./services/watcher
+    volumes:
+      - ./source:/data/source
+    environment:
+      SOURCE_DIR: /data/source
+      WATCH_EXT: ${WATCH_EXT:-.mp4,.mov}
+      POLL_INTERVAL_S: ${POLL_INTERVAL_S:-10}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "8081:8080"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frame-extractor:
+    build: ./services/frame-extractor
+    volumes:
+      - ./source:/data/source
+      - ./frames:/data/frames
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      POSTGRES_DSN: postgresql://iris:iris@postgres:5432/iris
+      FRAMES_DIR: /data/frames
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "8082:8080"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  embedder:
+    build: ./services/embedder
+    volumes:
+      - ./db:/app/db
+      - ./frames:/data/frames
+      - model_cache:/root/.cache
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      POSTGRES_DSN: postgresql://iris:iris@postgres:5432/iris
+      FRAMES_DIR: /data/frames
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-ViT-B-32}
+      EMBEDDING_DIM: "512"
+      EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-64}
+      BATCH_TTL_S: ${BATCH_TTL_S:-300}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "8083:8080"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    # Uncomment for GPU support:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # Uncomment to enable the example pipeline stage:
+  # pipeline-example:
+  #   build: ./services/pipeline-example
+  #   environment:
+  #     RABBITMQ_HOST: rabbitmq
+  #     EXAMPLE_SOURCE_EXCHANGE: iris.ingest
+  #     EXAMPLE_SOURCE_ROUTING_KEY: video.new
+  #     LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  #   depends_on:
+  #     rabbitmq:
+  #       condition: service_healthy
+  #   restart: unless-stopped
+
+  visualizer:
+    build: ./services/visualizer
+    volumes:
+      - ./source:/data/source
+      - ./frames:/data/frames
+    environment:
+      POSTGRES_DSN: postgresql://iris:iris@postgres:5432/iris
+      SOURCE_DIR: /data/source
+      FRAMES_DIR: /data/frames
+      CACHE_DIR: /tmp/iris_cache
+    ports:
+      - "8501:8501"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  rabbitmq_data:
+  pg_data:
+  model_cache:

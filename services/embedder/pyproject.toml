@@ -1,0 +1,14 @@
+[project]
+name = "iris-embedder"
+version = "0.1.0"
+description = "Project Iris - Embedder: consumes frames.extracted, CLIP inference, stores in pgvector"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "open-clip-torch>=2.24.0",
+    "opencv-python-headless>=5.0.0.93",
+    "pgvector>=0.4.2",
+    "pika>=1.4.1",
+    "psycopg[binary]>=3.3.4",
+    "torch>=2.12.1",
+]

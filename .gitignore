@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+uv.lock
+
+# Docker
+.env
+
+# Data (bind mount)
+source/*
+frames/*
+
+# Keep directories
+!source/.gitkeep
+!frames/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
