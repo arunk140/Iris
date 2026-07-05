@@ -1,6 +1,8 @@
 import io
 import os
 import pickle
+import subprocess
+import tempfile
 from datetime import datetime
 
 import cv2
@@ -207,6 +209,55 @@ def find_similar(video_id, frame_idx, limit=10, exclude_video_id=None):
     return rows
 
 
+def extract_clip(video_id, start_idx, clip_frames, source_path):
+    out_path = os.path.join(
+        CACHE_DIR, f"flow_{video_id}_{start_idx}_{clip_frames}s.mp4"
+    )
+    if os.path.exists(out_path):
+        return out_path
+    subprocess.run(
+        ["ffmpeg", "-ss", str(float(start_idx)), "-i", source_path,
+         "-t", str(clip_frames),
+         "-c:v", "libx264", "-preset", "ultrafast",
+         "-c:a", "aac", "-y", out_path],
+        capture_output=True, check=True,
+    )
+    return out_path
+
+
+def build_flow(video_id, start_idx, clip_frames, steps, first_filename, first_source_path):
+    flow = []
+    cur_vid, cur_idx = video_id, start_idx
+    cur_fname, cur_spath = first_filename, first_source_path
+    for step in range(steps):
+        clip_path = extract_clip(cur_vid, cur_idx, clip_frames, cur_spath)
+        flow.append((cur_vid, cur_idx, cur_fname, clip_path, None))
+        if step == steps - 1:
+            break
+        last_idx = cur_idx + clip_frames - 1
+        neighbors = find_similar(cur_vid, last_idx, limit=1, exclude_video_id=cur_vid)
+        if not neighbors:
+            break
+        n_vid, n_idx, n_ts, n_fname, n_spath, n_dist = neighbors[0]
+        flow[-1] = (cur_vid, cur_idx, cur_fname, clip_path, n_dist)
+        cur_vid, cur_idx, cur_fname, cur_spath = n_vid, n_idx, n_fname, n_spath
+    return flow
+
+
+def merge_flow(clip_paths, output_path):
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+        for path in clip_paths:
+            f.write(f"file '{path}'\n")
+        list_path = f.name
+    subprocess.run(
+        ["ffmpeg", "-f", "concat", "-safe", "0",
+         "-i", list_path, "-c", "copy", "-y", output_path],
+        capture_output=True, check=True,
+    )
+    os.unlink(list_path)
+    return output_path
+
+
 def st_main():
     st.title("Iris — Embedding Visualizer")
 
@@ -247,6 +298,11 @@ def st_main():
             value=True,
             help="Exclude frames from the same video as the selected point.",
         )
+
+        st.divider()
+        st.subheader("Flow")
+        clip_duration = st.slider("Clip duration (s)", 1, 10, 5)
+        flow_steps = st.slider("Flow steps", 2, 10, 5)
 
         compute_clicked = False
         if method in ("t-SNE", "UMAP"):
@@ -371,6 +427,42 @@ def st_main():
                 if nn_frame is not None:
                     st.image(nn_frame, width=150)
                 st.divider()
+
+        st.divider()
+        st.subheader("Flow")
+        if st.button("Build Flow", type="primary"):
+            with st.spinner("Building flow..."):
+                flow = build_flow(
+                    selection["video_id"],
+                    selection["idx"],
+                    clip_duration,
+                    flow_steps,
+                    selection["filename"],
+                    selection["source_path"],
+                )
+            st.session_state.flow = flow
+            st.rerun()
+
+        if "flow" in st.session_state and st.session_state.flow:
+            for i, (vid, sidx, fname, clip_path, tdist) in enumerate(st.session_state.flow):
+                st.write(f"**Step {i+1}** — {fname} @ {sidx}s")
+                st.video(clip_path)
+                if tdist is not None:
+                    st.caption(f"→ distance: {tdist:.4f}")
+                st.divider()
+
+            if st.button("Merge to single video"):
+                with st.spinner("Merging clips..."):
+                    merged = merge_flow(
+                        [step[3] for step in st.session_state.flow],
+                        os.path.join(CACHE_DIR, "flow_merged.mp4"),
+                    )
+                st.session_state.flow_merged = merged
+                st.rerun()
+
+            if "flow_merged" in st.session_state:
+                st.subheader("Merged Flow")
+                st.video(st.session_state.flow_merged)
 
 
 if __name__ == "__main__":

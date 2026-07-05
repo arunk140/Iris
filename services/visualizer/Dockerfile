@@ -9,5 +9,6 @@ RUN uv sync --frozen --no-dev --no-cache
 COPY visualizer.py ./
 
 FROM base AS runner
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 EXPOSE 8501
 CMD ["uv", "run", "streamlit", "run", "visualizer.py", "--server.port=8501", "--server.address=0.0.0.0"]
