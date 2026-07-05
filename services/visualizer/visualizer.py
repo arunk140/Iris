@@ -355,48 +355,47 @@ def st_main():
     with st.sidebar:
         st.header("Controls")
 
-        method = st.radio(
-            "Dimensionality reduction",
-            ["PCA", "t-SNE"] + (["UMAP"] if umap_available else []),
-            index=0,
-            help="PCA uses pre-computed values (instant). t-SNE/UMAP need explicit computation.",
-        )
+        with st.expander("Visualization", expanded=True):
+            method = st.radio(
+                "Dimensionality reduction",
+                ["PCA", "t-SNE"] + (["UMAP"] if umap_available else []),
+                index=0,
+                help="PCA uses pre-computed values (instant). t-SNE/UMAP need explicit computation.",
+            )
 
-        max_sample = min(n_total, 2000)
-        n_samples = st.slider(
-            "Sample size",
-            min_value=min(50, n_total),
-            max_value=n_total,
-            value=min(max_sample, n_total),
-            step=1,
-            help=f"Total embeddings: {n_total}. Reduce for faster rendering.",
-        )
+            max_sample = min(n_total, 2000)
+            n_samples = st.slider(
+                "Sample size",
+                min_value=min(50, n_total),
+                max_value=n_total,
+                value=min(max_sample, n_total),
+                step=1,
+                help=f"Total embeddings: {n_total}. Reduce for faster rendering.",
+            )
 
-        color_by = st.selectbox("Color by", ["filename", "video_id", None])
+            color_by = st.selectbox("Color by", ["filename", "video_id", None])
 
-        st.divider()
-        cross_video = st.checkbox(
-            "Cross-video search only",
-            value=True,
-            help="Exclude frames from the same video as the selected point.",
-        )
+        with st.expander("Search", expanded=True):
+            cross_video = st.checkbox(
+                "Cross-video search only",
+                value=True,
+                help="Exclude frames from the same video as the selected point.",
+            )
 
-        st.divider()
-        st.subheader("Flow")
-        clip_duration = st.slider("Clip duration (s)", 1, 10, 5)
-        flow_steps = st.number_input("Flow steps", min_value=0, max_value=500, value=5)
-        overlap = st.slider("Transition overlap (s)", 0.0, 3.0, 1.0, 0.5)
-        use_xfade = st.checkbox("Crossfade transitions", value=False,
-                                help="Merge clips with crossfade (re-encodes, slow)")
+        with st.expander("Flow Settings", expanded=False):
+            clip_duration = st.slider("Clip duration (s)", 1, 10, 5)
+            flow_steps = st.number_input("Flow steps", min_value=0, max_value=500, value=5)
+            overlap = st.slider("Transition overlap (s)", 0.0, 3.0, 1.0, 0.5)
+            use_xfade = st.checkbox("Crossfade transitions", value=False,
+                                    help="Merge clips with crossfade (re-encodes, slow)")
 
-        compute_clicked = False
-        if method in ("t-SNE", "UMAP"):
-            compute_clicked = st.button(f"Compute {method}", type="primary")
-
-        st.divider()
-        if st.button("Refresh data", type="secondary"):
-            st.cache_data.clear()
-            st.rerun()
+        with st.expander("Advanced", expanded=False):
+            compute_clicked = False
+            if method in ("t-SNE", "UMAP"):
+                compute_clicked = st.button(f"Compute {method}", type="primary")
+            if st.button("Refresh data", type="secondary"):
+                st.cache_data.clear()
+                st.rerun()
 
     coords, sample_idx, method_label = None, None, ""
 
@@ -456,48 +455,53 @@ def st_main():
     if "selected_point_index" not in st.session_state:
         st.session_state.selected_point_index = None
 
-    clicked = st.plotly_chart(fig, width='stretch', on_select="rerun")
+    tab1, tab2, tab3 = st.tabs(["Projection", "Neighbors", "Flow"])
 
-    fresh_click = False
-    if clicked and "selection" in clicked:
-        pts = clicked["selection"].get("points", [])
-        if pts and "point_index" in pts[0]:
-            idx_in_plot = pts[0]["point_index"]
-            if idx_in_plot is not None and idx_in_plot < len(plot_df):
-                fresh_click = True
-                st.session_state.selected_point_index = idx_in_plot
+    with tab1:
+        clicked = st.plotly_chart(fig, width='stretch', on_select="rerun")
 
-    selection = None
-    if st.session_state.selected_point_index is not None:
-        selection = plot_df.iloc[st.session_state.selected_point_index]
+        fresh_click = False
+        if clicked and "selection" in clicked:
+            pts = clicked["selection"].get("points", [])
+            if pts and "point_index" in pts[0]:
+                idx_in_plot = pts[0]["point_index"]
+                if idx_in_plot is not None and idx_in_plot < len(plot_df):
+                    fresh_click = True
+                    st.session_state.selected_point_index = idx_in_plot
 
-    if selection is not None:
-        col1, col2 = st.columns([1, 1])
+        selection = None
+        if st.session_state.selected_point_index is not None:
+            selection = plot_df.iloc[st.session_state.selected_point_index]
 
-        with col1:
-            st.subheader("Selected Frame")
-            st.write(
-                f"**Video:** {selection['filename']}  "
-                f"**Timestamp:** {selection['timestamp_s']:.1f}s  "
-                f"**Video ID:** {selection['video_id']}"
-            )
-
-            source_path = selection.get("source_path", "")
-            if source_path:
-                frame = load_frame(
-                    selection["video_id"],
-                    selection["idx"],
-                    selection["timestamp_s"],
-                    source_path,
+        if selection is not None:
+            with st.expander("Selected Frame", expanded=True):
+                st.write(
+                    f"**Video:** {selection['filename']}  "
+                    f"**Timestamp:** {selection['timestamp_s']:.1f}s  "
+                    f"**Video ID:** {selection['video_id']}"
                 )
-                if frame is not None:
-                    st.image(frame, width='stretch')
-                else:
-                    st.caption("Could not load frame.")
-            else:
-                st.caption("No source path available.")
 
-        with col2:
+                source_path = selection.get("source_path", "")
+                if source_path:
+                    frame = load_frame(
+                        selection["video_id"],
+                        selection["idx"],
+                        selection["timestamp_s"],
+                        source_path,
+                    )
+                    if frame is not None:
+                        st.image(frame, width='stretch')
+                    else:
+                        st.caption("Could not load frame.")
+                else:
+                    st.caption("No source path available.")
+
+    with tab2:
+        selection = None
+        if st.session_state.selected_point_index is not None:
+            selection = plot_df.iloc[st.session_state.selected_point_index]
+
+        if selection is not None:
             st.subheader("Nearest Neighbors")
             neighbors = find_similar(
                 selection["video_id"],
@@ -512,30 +516,41 @@ def st_main():
                 if nn_frame is not None:
                     st.image(nn_frame, width=150)
                 st.divider()
+        else:
+            st.info("Click a point on the **Projection** tab to see its nearest neighbors.")
 
-        st.divider()
-        st.subheader("Flow")
-        if st.button("Build Flow", type="primary"):
-            with st.spinner("Building flow..."):
-                flow = build_flow(
-                    selection["video_id"],
-                    selection["idx"],
-                    clip_duration,
-                    flow_steps,
-                    selection["filename"],
-                    selection["source_path"],
-                )
-            st.session_state.flow = flow
-            st.rerun()
+    with tab3:
+        selection = None
+        if st.session_state.selected_point_index is not None:
+            selection = plot_df.iloc[st.session_state.selected_point_index]
+
+        if selection is not None:
+            st.subheader("Build Flow")
+            if st.button("Build Flow", type="primary"):
+                with st.spinner("Building flow..."):
+                    flow = build_flow(
+                        selection["video_id"],
+                        selection["idx"],
+                        clip_duration,
+                        flow_steps,
+                        selection["filename"],
+                        selection["source_path"],
+                    )
+                st.session_state.flow = flow
+                st.rerun()
+        else:
+            st.info("Click a point on the **Projection** tab to build a flow.")
 
         if "flow" in st.session_state and st.session_state.flow:
+            st.divider()
+            st.subheader("Flow Steps")
             for i, (vid, sidx, fname, clip_path, tdist) in enumerate(st.session_state.flow):
-                st.write(f"**Step {i+1}** — {fname} @ {sidx}s")
-                st.video(clip_path)
-                if tdist is not None:
-                    st.caption(f"→ distance: {tdist:.4f}")
-                st.divider()
+                with st.expander(f"Step {i+1} — {fname} @ {sidx}s", expanded=i==0):
+                    st.video(clip_path)
+                    if tdist is not None:
+                        st.caption(f"→ distance: {tdist:.4f}")
 
+            st.divider()
             if st.button("Merge to single video"):
                 with st.spinner("Merging clips..."):
                     merged = merge_flow(
