@@ -542,13 +542,12 @@ def st_main():
             st.info("Click a point on the **Projection** tab to build a flow.")
 
         if "flow" in st.session_state and st.session_state.flow:
-            st.divider()
-            st.subheader("Flow Steps")
-            for i, (vid, sidx, fname, clip_path, tdist) in enumerate(st.session_state.flow):
-                with st.expander(f"Step {i+1} — {fname} @ {sidx}s", expanded=i==0):
-                    st.video(clip_path)
-                    if tdist is not None:
-                        st.caption(f"→ distance: {tdist:.4f}")
+            with st.expander("Flow Steps", expanded=False):
+                for i, (vid, sidx, fname, clip_path, tdist) in enumerate(st.session_state.flow):
+                    with st.expander(f"Step {i+1} — {fname} @ {sidx}s", expanded=i==0):
+                        st.video(clip_path)
+                        if tdist is not None:
+                            st.caption(f"→ distance: {tdist:.4f}")
 
             st.divider()
             if st.button("Merge to single video"):
