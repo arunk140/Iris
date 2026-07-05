@@ -57,6 +57,7 @@ services:
       RABBITMQ_PORT: "5672"
       POSTGRES_DSN: postgresql://iris:iris@postgres:5432/iris
       FRAMES_DIR: /data/frames
+      FRAME_RATE: ${FRAME_RATE:-1}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
       - "8082:8080"
@@ -123,6 +124,7 @@ services:
       SOURCE_DIR: /data/source
       FRAMES_DIR: /data/frames
       CACHE_DIR: /tmp/iris_cache
+      FRAME_RATE: ${FRAME_RATE:-1}
       STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
       STREAMLIT_TELEMETRY_DISABLED: "true"
     ports:

@@ -21,6 +21,7 @@ RABBITMQ_USER = os.getenv("RABBITMQ_USER", "guest")
 RABBITMQ_PASS = os.getenv("RABBITMQ_PASS", "guest")
 POSTGRES_DSN = os.getenv("POSTGRES_DSN", "postgresql://iris:iris@postgres:5432/iris")
 FRAMES_DIR = os.getenv("FRAMES_DIR", "/data/frames")
+FRAME_RATE = int(os.getenv("FRAME_RATE", "1"))
 
 INPUT_QUEUE = "iris.video.new"
 DLX_EXCHANGE = "iris.dlx"
@@ -150,7 +151,10 @@ def extract_frames(video_path, frames_dir):
 
     os.makedirs(frames_dir, exist_ok=True)
 
-    for t in range(int(duration_s) + 1):
+    frame_interval = 1.0 / FRAME_RATE
+    n_frames = int(duration_s * FRAME_RATE) + 1
+    for i in range(n_frames):
+        t = i * frame_interval
         target_frame = int(t * fps)
         cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
         ret, frame = cap.read()
@@ -160,15 +164,15 @@ def extract_frames(video_path, frames_dir):
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         success, buf = cv2.imencode(".jpg", rgb, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
         if not success:
-            logger.warning("Failed to encode frame at t=%d", t)
+            logger.warning("Failed to encode frame at t=%.1f", t)
             continue
 
-        frame_path = os.path.join(frames_dir, f"{t:06d}.jpg")
+        frame_path = os.path.join(frames_dir, f"{i:06d}.jpg")
         with open(frame_path, "wb") as f:
             f.write(buf)
 
         frame_paths.append(frame_path)
-        timestamps.append(float(t))
+        timestamps.append(t)
 
     cap.release()
     return frame_paths, timestamps, duration_s, width, height, fps

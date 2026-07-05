@@ -25,6 +25,7 @@ POSTGRES_DSN = os.getenv(
 SOURCE_DIR = os.getenv("SOURCE_DIR", "/data/source")
 FRAMES_DIR = os.getenv("FRAMES_DIR", "/data/frames")
 CACHE_DIR = os.getenv("CACHE_DIR", "/tmp/iris_cache")
+FRAME_RATE = int(os.getenv("FRAME_RATE", "1"))
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 
@@ -103,6 +104,32 @@ def load_data():
 
     conn.close()
     return df
+
+
+def load_stats():
+    conn = psycopg.connect(POSTGRES_DSN)
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT
+                COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE status = 'done') AS done,
+                COUNT(*) FILTER (WHERE status = 'pending') AS pending,
+                COUNT(*) FILTER (WHERE status = 'processing') AS processing,
+                COUNT(*) FILTER (WHERE status = 'error') AS error
+            FROM videos
+        """)
+        video_row = cur.fetchone()
+        cur.execute("SELECT COUNT(*) FROM frames")
+        frame_count = cur.fetchone()[0]
+    conn.close()
+    return {
+        "total": video_row[0],
+        "done": video_row[1],
+        "pending": video_row[2],
+        "processing": video_row[3],
+        "error": video_row[4],
+        "total_frames": frame_count,
+    }
 
 
 @st.cache_data
@@ -221,14 +248,14 @@ def find_similar(video_id, frame_idx, limit=10, exclude_video_id=None):
     return rows
 
 
-def extract_clip(video_id, start_idx, clip_frames, source_path):
+def extract_clip(video_id, start_ts, clip_frames, source_path):
     out_path = os.path.join(
-        CACHE_DIR, f"flow_{video_id}_{start_idx}_{clip_frames}s.mp4"
+        CACHE_DIR, f"flow_{video_id}_{start_ts}_{clip_frames}s.mp4"
     )
     if os.path.exists(out_path):
         return out_path
     subprocess.run(
-        ["ffmpeg", "-ss", str(float(start_idx)), "-i", source_path,
+        ["ffmpeg", "-ss", str(start_ts), "-i", source_path,
          "-t", str(clip_frames),
          "-c:v", "libx264", "-preset", "ultrafast",
          "-c:a", "aac", "-y", out_path],
@@ -243,11 +270,12 @@ def build_flow(video_id, start_idx, clip_frames, steps, first_filename, first_so
     cur_fname, cur_spath = first_filename, first_source_path
     used_clips = {(video_id, start_idx)}
     for step in range(steps):
-        clip_path = extract_clip(cur_vid, cur_idx, clip_frames, cur_spath)
+        cur_ts = cur_idx / FRAME_RATE
+        clip_path = extract_clip(cur_vid, cur_ts, clip_frames, cur_spath)
         flow.append((cur_vid, cur_idx, cur_fname, clip_path, None))
         if step == steps - 1:
             break
-        last_idx = cur_idx + clip_frames - 1
+        last_idx = cur_idx + clip_frames * FRAME_RATE - 1
         neighbors = find_similar(cur_vid, last_idx, limit=10, exclude_video_id=cur_vid)
         next_step = None
         for n in neighbors:
@@ -343,6 +371,11 @@ def merge_flow(clip_paths, output_path, clip_duration, overlap, use_xfade=False)
 def st_main():
     st.title("Iris — Embedding Visualizer")
 
+    stats = load_stats()
+    total_videos = stats.get("total", 0)
+    done_videos = stats.get("done", 0)
+    total_frames = stats.get("total_frames", 0)
+
     df = load_data()
     if df.empty:
         st.warning("No processed videos found in the database.")
@@ -354,6 +387,17 @@ def st_main():
 
     with st.sidebar:
         st.header("Controls")
+
+        with st.expander("Stats", expanded=True):
+            col1, col2 = st.columns(2)
+            col1.metric("Videos", total_videos)
+            col2.metric("Done", done_videos)
+            col1.metric("Frames", f"{total_frames:,}")
+            pending = stats.get("pending", 0)
+            processing = stats.get("processing", 0)
+            col2.metric("In Queue", pending + processing)
+            if stats.get("error", 0):
+                st.warning(f"{stats['error']} videos in error")
 
         with st.expander("Visualization", expanded=True):
             method = st.radio(
