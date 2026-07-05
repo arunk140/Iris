@@ -1,6 +1,8 @@
+import concurrent.futures
 import io
 import os
 import pickle
+import shutil
 import subprocess
 import tempfile
 from datetime import datetime
@@ -24,6 +26,16 @@ SOURCE_DIR = os.getenv("SOURCE_DIR", "/data/source")
 FRAMES_DIR = os.getenv("FRAMES_DIR", "/data/frames")
 CACHE_DIR = os.getenv("CACHE_DIR", "/tmp/iris_cache")
 os.makedirs(CACHE_DIR, exist_ok=True)
+
+
+def get_duration(path):
+    r = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries",
+         "format=duration", "-of", "csv=p=0", path],
+        capture_output=True, text=True, check=True,
+    )
+    return float(r.stdout.strip())
+
 
 umap_available = False
 try:
@@ -244,27 +256,79 @@ def build_flow(video_id, start_idx, clip_frames, steps, first_filename, first_so
     return flow
 
 
-def merge_flow(clip_paths, output_path, clip_duration, overlap):
-    n = len(clip_paths)
-    filters = []
-    for i in range(n):
-        filters.append(f"[{i}:v]trim=duration={clip_duration}[v{i}]")
-    prev = "v0"
-    for i in range(1, n):
-        out = "outv" if i == n - 1 else f"m{i}"
-        offset = i * (clip_duration - overlap)
-        filters.append(
-            f"[{prev}][v{i}]xfade=transition=fade:duration={overlap}:offset={offset},"
-            f"format=yuv420p[{out}]"
-        )
-        prev = out
-    inputs = [arg for p in clip_paths for arg in ("-i", p)]
+def merge_pair(path_a, dur_a, path_b, dur_b, out_path, overlap):
+    offset = dur_a - overlap
     subprocess.run(
-        ["ffmpeg"] + inputs
-        + ["-filter_complex", ";".join(filters),
-           "-map", f"[{prev}]", "-an", "-y", output_path],
+        ["ffmpeg", "-i", path_a, "-i", path_b,
+         "-filter_complex",
+         f"[0:v][1:v]xfade=transition=fade:duration={overlap}:offset={offset},"
+         f"format=yuv420p",
+         "-an", "-y", out_path],
         capture_output=True, check=True,
     )
+    real_dur = get_duration(out_path)
+    return out_path, real_dur
+
+
+def concat_clips(clip_paths, output_path):
+    list_file = os.path.join(CACHE_DIR, "concat_list.txt")
+    with open(list_file, "w") as f:
+        for p in clip_paths:
+            f.write(f"file '{p}'\n")
+    subprocess.run(
+        ["ffmpeg", "-f", "concat", "-safe", "0",
+         "-i", list_file, "-c", "copy", "-an", "-y", output_path],
+        capture_output=True, check=True,
+    )
+    return output_path
+
+
+def merge_flow(clip_paths, output_path, clip_duration, overlap, use_xfade=False):
+    if not use_xfade:
+        return concat_clips(clip_paths, output_path)
+    if len(clip_paths) <= 1:
+        if clip_paths:
+            shutil.copy2(clip_paths[0], output_path)
+        return output_path
+
+    clips = [(p, clip_duration) for p in clip_paths]
+    level = 0
+    while len(clips) > 1:
+        next_clips = []
+        tasks = []
+        for i in range(0, len(clips), 2):
+            if i + 1 >= len(clips):
+                next_clips.append(clips[i])
+                continue
+            path_a, dur_a = clips[i]
+            path_b, dur_b = clips[i | 1]
+            out = os.path.join(CACHE_DIR, f"merge_l{level}_{i // 2}.mp4")
+            tasks.append((path_a, dur_a, path_b, dur_b, out, overlap))
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(tasks))) as pool:
+            futures = [pool.submit(merge_pair, *t) for t in tasks]
+            for f in concurrent.futures.as_completed(futures):
+                out_path, out_dur = f.result()
+                next_clips.append((out_path, out_dur))
+
+        consumed = set()
+        for i in range(0, len(clips) - 1, 2):
+            consumed.add(clips[i][0])
+            consumed.add(clips[i + 1][0])
+        for path, _ in clips:
+            if path.startswith(os.path.join(CACHE_DIR, "merge_l")) and path in consumed:
+                try:
+                    os.unlink(path)
+                except Exception:
+                    pass
+        clips = next_clips
+        level += 1
+
+    shutil.copy2(clips[0][0], output_path)
+    try:
+        os.unlink(clips[0][0])
+    except Exception:
+        pass
     return output_path
 
 
@@ -314,6 +378,8 @@ def st_main():
         clip_duration = st.slider("Clip duration (s)", 1, 10, 5)
         flow_steps = st.number_input("Flow steps", min_value=0, max_value=500, value=5)
         overlap = st.slider("Transition overlap (s)", 0.0, 3.0, 1.0, 0.5)
+        use_xfade = st.checkbox("Crossfade transitions", value=False,
+                                help="Merge clips with crossfade (re-encodes, slow)")
 
         compute_clicked = False
         if method in ("t-SNE", "UMAP"):
@@ -467,7 +533,7 @@ def st_main():
                     merged = merge_flow(
                         [step[3] for step in st.session_state.flow],
                         os.path.join(CACHE_DIR, "flow_merged.mp4"),
-                        clip_duration, overlap,
+                        clip_duration, overlap, use_xfade,
                     )
                 st.session_state.flow_merged = merged
                 st.rerun()
